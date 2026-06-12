@@ -1,5 +1,6 @@
-
 # 🐬 FlipperZero-BadUSB-Scripts
+
+**English** · [Русский](README.ru.md)
 
 A collection of BadUSB scripts for Flipper Zero, including useful utilities and demonstrations of the device's capabilities. These scripts are designed for security testing and task automation.
 
